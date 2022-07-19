@@ -1,4 +1,3 @@
-from configparser import ConfigParser
 from logging import exception
 import numpy as np
 import requests
@@ -8,11 +7,9 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
-conf = ConfigParser()
-conf.read('config.conf')
-
 # SETUP CONFIGS
-API_KEY = conf['default']['api_key']
+# As per your .toml file.
+API_KEY = st.secrets.sdk_creds.api_key
 
 SQL_QUERY = """
     SELECT 
@@ -59,20 +56,6 @@ def get_query_results(token):
 
     return data
 
-def wrap(s, w):
-    return [s[i:i + w] for i in range(0, len(s), w)]
-
-
-
-# MethodID: 0x7ac09bf7
-# [0]:  0000000000000000000000000000000000000000000000000000000000001077
-# [1]:  0000000000000000000000000000000000000000000000000000000000000060
-# [2]:  00000000000000000000000000000000000000000000000000000000000000a0
-# [3]:  0000000000000000000000000000000000000000000000000000000000000001  -> pool count N
-# [4]:  00000000000000000000000079c912fef520be002c2b6e57ec4324e260f38e50  -> N pools
-# [5]:  0000000000000000000000000000000000000000000000000000000000000001  -> weight count N
-# [6]:  0000000000000000000000000000000000000000000000000000000000002710  -> N weights
-
 pool_lookup = {
     '0x4f7ebc19844259386dbddb7b2eb759eefc6f8353':'StableV1 AMM - USDC/DAI',
     '0xd16232ad60188b68076a235c65d692090caba155':'StableV1 AMM - USDC/sUSD',
@@ -113,29 +96,46 @@ pool_lookup = {
     '0x53bea2d15efe344b054e73209455d2b6aa1c9462':'VolatileV1 AMM - OP/sUSD'
 }
 
+def wrap(s, w):
+    return [s[i:i + w] for i in range(0, len(s), w)]
+
+# MethodID: 0x7ac09bf7
+# [0]:  0000000000000000000000000000000000000000000000000000000000001077
+# [1]:  0000000000000000000000000000000000000000000000000000000000000060
+# [2]:  00000000000000000000000000000000000000000000000000000000000000a0
+# [3]:  0000000000000000000000000000000000000000000000000000000000000001  -> pool count N
+# [4]:  00000000000000000000000079c912fef520be002c2b6e57ec4324e260f38e50  -> N pools
+# [5]:  0000000000000000000000000000000000000000000000000000000000000001  -> weight count N
+# [6]:  0000000000000000000000000000000000000000000000000000000000002710  -> N weights
+
 def build_data(data):
     output = []
     for row in data['results']:
         long_hex = row[3].split('0x7ac09bf7')[1]
         hex_rows = wrap(long_hex, 64)
-        #print(hex_rows)
+        # print(hex_rows)
 
+        # take taoken_id from first row
         token_id = int(hex_rows[0], 16)
         pools = []
         weights = []
-       
+
+        # loop N addresses using the count in row#4
+        # get each address, fix the string
         for i in range(0, int(hex_rows[3], 16)):
             pools.append('0x'+ hex_rows[4 + i][24:])
 
+        # use len/count of pools for deducing displacement of rows to get weight count row/weight row start
+        # get each weight
         for i in range(0, int(hex_rows[3 + len(pools) + 1], 16)):
             weights.append(int(hex_rows[3 + len(pools) + 2 +i], 16))
 
-        #print(pools,weights)
+        # print(pools,weights)
 
         # build each tuple as needed for data:
         for i in range(0, len(pools)):
-            #print(row[0], row[1], row[2],token_id, pools[i], weights[i])
-            #check if lookup exists
+            # print(row[0], row[1], row[2],token_id, pools[i], weights[i])
+            # check if address in lookup dict
             try:
                 alias = pool_lookup[pools[i]]
             except Exception:
@@ -148,27 +148,33 @@ def run():
     query = create_query()
     token = query.get('token')
     data = get_query_results(token)
-    #print(data['columnLabels'])
+    # print(data['columnLabels'])
+    
     st.title('Velodrome Voting Stats')
     st.write('''Disclaimer: Since getting accurate voting stats was not possible with Snowflake/Velocity, 
     I have tried to use streamlit and it's supported charting libraries. Since these are a bit new for me, 
     most interactive features are currently lacking D:\n
     INCASE OF EXCEPTIONS/Timeouts RELOAD/REFRESH the page!''')
-    op_tuples = build_data(data)
-    #print(op)
+    
     st.write('''We look at how people people are using their votes, and which pools are the most popular based on\n
     1. Highest Weights/Votes gained\n
     2. Most Distinct Users that voted\n
     3. Most distinct vote transactions casted''')
+
+    op_tuples = build_data(data)
+    # print(op_tuples)
+
     df = pd.DataFrame(op_tuples, columns =['timestamp', 'hash', 'wallet', 'token_id', 'pool_address', 'pool_alias', 'weights'])
+    print(df)
 
     totals_base = df.groupby(['pool_address','pool_alias']).agg(
             total_weight=('weights', np.sum),
             total_txns=('hash', lambda x: x.nunique()),
             total_users=('wallet', lambda x: x.nunique())
         )
+
     totals = totals_base.sort_values("total_weight", ascending = False).head(10).reset_index()
-    #print(totals)
+    # print(totals)
 
     fig, ax = plt.subplots()
     ax.set_title('Top 10 Pools by weights')

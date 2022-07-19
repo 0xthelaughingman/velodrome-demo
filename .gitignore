@@ -1,3 +1,7 @@
+# Ignore local TOML file with the APK secret/configs
+# https://docs.streamlit.io/streamlit-cloud/get-started/deploy-an-app/connect-to-data-sources/secrets-management
+*.toml
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
